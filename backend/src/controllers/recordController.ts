@@ -1,1 +1,337 @@
-import { Request, Response } from "express";\nimport { prisma } from "../lib/prisma.js\";\n\n/**\n * Get all records for an organization with status calculations\n */\nexport async function getRecords(req: Request, res: Response) {\n  const { organizationId } = req.query;\n\n  if (!organizationId) {\n    return res.status(400).json({ error: \"organizationId is required\" });\n  }\n\n  const records = await prisma.record.findMany({\n    where: { organizationId: organizationId as string },\n    include: {\n      contact: true,\n      currentStage: true,\n      assignedTo: true,\n      tasks: true,\n      notes: { orderBy: { createdAt: \"desc\" } },\n      contentShares: { include: { content: true } },\n      goodNewsDetails: true,\n      travelDetails: true,\n    },\n  });\n\n  res.json({ records });\n}\n\n/**\n * Get a single record with all relationships\n */\nexport async function getRecordById(req: Request, res: Response) {\n  const { id } = req.params;\n\n  const record = await prisma.record.findUnique({\n    where: { id },\n    include: {\n      contact: { include: { familyMembers: true } },\n      currentStage: true,\n      assignedTo: true,\n      tasks: true,\n      notes: { orderBy: { createdAt: \"desc\" } },\n      contentShares: { include: { content: true } },\n      goodNewsDetails: true,\n      travelDetails: true,\n    },\n  });\n\n  if (!record) {\n    return res.status(404).json({ error: \"Record not found\" });\n  }\n\n  res.json({ record });\n}\n\n/**\n * Create a new record (contact entering the pipeline)\n */\nexport async function createRecord(req: Request, res: Response) {\n  const {\n    organizationId,\n    contactId,\n    pipelineId,\n    currentStageId,\n    assignedToId,\n    title,\n  } = req.body;\n\n  if (!organizationId || !contactId || !pipelineId || !currentStageId) {\n    return res.status(400).json({\n      error: \"organizationId, contactId, pipelineId, and currentStageId are required\",\n    });\n  }\n\n  const record = await prisma.record.create({\n    data: {\n      organizationId,\n      contactId,\n      pipelineId,\n      currentStageId,\n      assignedToId,\n      title: title || \"New Contact\",\n      status: \"active\",\n      followUpLevel: \"FU1\",\n    },\n    include: {\n      contact: true,\n      currentStage: true,\n      assignedTo: true,\n    },\n  });\n\n  res.status(201).json({ record });\n}\n\n/**\n * Move record to next stage\n * Handles the pipeline progression with business rules\n */\nexport async function moveToNextStage(req: Request, res: Response) {\n  const { recordId, nextStageId, notes } = req.body;\n\n  if (!recordId || !nextStageId) {\n    return res.status(400).json({ error: \"recordId and nextStageId are required\" });\n  }\n\n  const record = await prisma.record.findUnique({\n    where: { id: recordId },\n    include: { currentStage: true, contact: true, pipeline: { include: { stages: true } } },\n  });\n\n  if (!record) {\n    return res.status(404).json({ error: \"Record not found\" });\n  }\n\n  // Log stage transition\n  await prisma.recordStageHistory.create({\n    data: {\n      recordId,\n      fromStageId: record.currentStageId,\n      toStageId: nextStageId,\n      notes,\n    },\n  });\n\n  // Update record with new stage\n  const updatedRecord = await prisma.record.update({\n    where: { id: recordId },\n    data: {\n      currentStageId: nextStageId,\n      updatedAt: new Date(),\n    },\n    include: { currentStage: true, contact: true },\n  });\n\n  res.json({ record: updatedRecord });\n}\n\n/**\n * Update follow-up level (FU1 -> FU2 -> FU3 -> FU4 -> FU5)\n */\nexport async function updateFollowUpLevel(req: Request, res: Response) {\n  const { recordId, level } = req.body;\n\n  if (!recordId || !level) {\n    return res.status(400).json({ error: \"recordId and level are required\" });\n  }\n\n  const validLevels = [\"FU1\", \"FU2\", \"FU3\", \"FU4\", \"FU5\"];\n  if (!validLevels.includes(level)) {\n    return res.status(400).json({ error: \"Invalid follow-up level\" });\n  }\n\n  const record = await prisma.record.update({\n    where: { id: recordId },\n    data: {\n      followUpLevel: level,\n      updatedAt: new Date(),\n    },\n  });\n\n  res.json({ record });\n}\n\n/**\n * Share content with a contact\n * Allows multiple content selections\n */\nexport async function shareContent(req: Request, res: Response) {\n  const { recordId, contentIds, sharedById } = req.body;\n\n  if (!recordId || !contentIds || !Array.isArray(contentIds)) {\n    return res.status(400).json({\n      error: \"recordId and contentIds (array) are required\",\n    });\n  }\n\n  // Create content share records for each selected content\n  const contentShares = await Promise.all(\n    contentIds.map((contentId) =>\n      prisma.contentShare.create({\n        data: {\n          recordId,\n          contentId,\n          sharedById,\n          status: \"shared\",\n        },\n        include: { content: true },\n      })\n    )\n  );\n\n  // Mark content as shared on the record\n  const record = await prisma.record.update({\n    where: { id: recordId },\n    data: {\n      contentShared: true,\n      updatedAt: new Date(),\n    },\n  });\n\n  res.json({ record, contentShares });\n}\n\n/**\n * Confirm readiness for Good News\n * Gated by contentShared = true\n */\nexport async function confirmReadinessForGoodNews(req: Request, res: Response) {\n  const { recordId, goodNewsDate, attendanceType } = req.body;\n\n  if (!recordId) {\n    return res.status(400).json({ error: \"recordId is required\" });\n  }\n\n  const record = await prisma.record.findUnique({\n    where: { id: recordId },\n    include: { contact: { include: { familyMembers: true } } },\n  });\n\n  if (!record) {\n    return res.status(404).json({ error: \"Record not found\" });\n  }\n\n  // Validate that content has been shared\n  if (!record.contentShared) {\n    return res.status(400).json({\n      error: \"Content must be shared before confirming readiness\",\n    });\n  }\n\n  // Create Good News details\n  const goodNewsDetail = await prisma.goodNewsDetail.create({\n    data: {\n      recordId,\n      status: \"confirmed\",\n      date: goodNewsDate ? new Date(goodNewsDate) : new Date(),\n      attendanceType,\n      confirmedAt: new Date(),\n    },\n  });\n\n  // Auto-generate travel details with family information\n  const travelDetail = await prisma.travelDetail.create({\n    data: {\n      recordId,\n      goodNewsDetailId: goodNewsDetail.id,\n      contactName: `${record.contact.firstName} ${record.contact.lastName}`,\n      familyMembers: record.contact.familyMembers.map((fm) => ({\n        name: `${fm.firstName} ${fm.lastName || \"\"}`,\n        relationship: fm.relationship,\n        isPrimary: fm.isPrimaryContact,\n      })),\n      departureLocation: \"To be determined\",\n      arrivalLocation: \"Good News Event Location\",\n      departureDate: goodNewsDate ? new Date(goodNewsDate) : new Date(),\n    },\n  });\n\n  // Update record status\n  const updatedRecord = await prisma.record.update({\n    where: { id: recordId },\n    data: {\n      readyForGoodNews: true,\n      updatedAt: new Date(),\n    },\n  });\n\n  res.json({\n    record: updatedRecord,\n    goodNewsDetail,\n    travelDetail,\n  });\n}\n\n/**\n * Send travel details to manager\n */\nexport async function sendTravelDetailsToManager(\n  req: Request,\n  res: Response\n) {\n  const { travelDetailId, managerId } = req.body;\n\n  if (!travelDetailId || !managerId) {\n    return res.status(400).json({\n      error: \"travelDetailId and managerId are required\",\n    });\n  }\n\n  const travelDetail = await prisma.travelDetail.update({\n    where: { id: travelDetailId },\n    data: {\n      sentToManager: true,\n      sentAt: new Date(),\n    },\n  });\n\n  // In production, send email/SMS notification to manager\n  console.log(`Travel details sent to manager ${managerId}`);\n\n  res.json({ travelDetail });\n}\n\n/**\n * Record Good News attendance\n */\nexport async function recordGoodNewsAttendance(req: Request, res: Response) {\n  const { recordId, attendancePeriod } = req.body;\n\n  if (!recordId) {\n    return res.status(400).json({ error: \"recordId is required\" });\n  }\n\n  const record = await prisma.record.update({\n    where: { id: recordId },\n    data: {\n      attendedGoodNews: true,\n      goodNewsPeriod: attendancePeriod || \"during week\",\n      updatedAt: new Date(),\n    },\n  });\n\n  // Auto-create fellowship tracking record\n  const fellowshipTracking = await prisma.fellowshipTracking.create({\n    data: {\n      recordId,\n      goodNewsAttendedDate: new Date(),\n      status: \"in_progress\",\n    },\n  });\n\n  res.json({ record, fellowshipTracking });\n}\n\n/**\n * Mark record as completed 3 months in fellowship\n * Auto-generated for monthly reports\n */\nexport async function markThreeMonthCompletion(req: Request, res: Response) {\n  const { recordId } = req.body;\n\n  if (!recordId) {\n    return res.status(400).json({ error: \"recordId is required\" });\n  }\n\n  const record = await prisma.record.update({\n    where: { id: recordId },\n    data: {\n      completedThreeMonths: true,\n      status: \"completed\",\n      updatedAt: new Date(),\n    },\n  });\n\n  // Update fellowship tracking\n  await prisma.fellowshipTracking.updateMany({\n    where: { recordId },\n    data: {\n      status: \"completed\",\n      threeMonthCompletionDate: new Date(),\n    },\n  });\n\n  res.json({ record });\n}\n"
+import { Request, Response } from "express";
+import { prisma } from "../lib/prisma.js";
+
+function computeContactStatus(updatedAt: Date | null | undefined) {
+  if (!updatedAt) return "active";
+
+  const diffDays = Math.floor(
+    (Date.now() - new Date(updatedAt).getTime()) / (1000 * 60 * 60 * 24)
+  );
+
+  if (diffDays >= 30) return "pending";
+  if (diffDays >= 14) return "overdue";
+  if (diffDays >= 7) return "due";
+
+  return "active";
+}
+
+export async function getRecords(req: Request, res: Response) {
+  const { organizationId } = req.query;
+
+  if (!organizationId || typeof organizationId !== "string") {
+    return res.status(400).json({ error: "organizationId is required" });
+  }
+
+  const records = await prisma.record.findMany({
+    where: { organizationId },
+    include: {
+      contact: true,
+      currentStage: true,
+      assignedTo: true,
+      tasks: true,
+      notes: { orderBy: { createdAt: "desc" } },
+      contentShares: { include: { content: true } },
+      goodNewsDetails: true,
+      travelDetails: true,
+    },
+  });
+
+  const recordsWithStatus = records.map((record) => ({
+    ...record,
+    computedStatus: computeContactStatus(record.updatedAt),
+  }));
+
+  return res.json({ records: recordsWithStatus });
+}
+
+export async function getRecordById(req: Request, res: Response) {
+  const { id } = req.params;
+
+  const record = await prisma.record.findUnique({
+    where: { id },
+    include: {
+      contact: { include: { familyMembers: true } },
+      currentStage: true,
+      assignedTo: true,
+      tasks: true,
+      notes: { orderBy: { createdAt: "desc" } },
+      contentShares: { include: { content: true } },
+      goodNewsDetails: true,
+      travelDetails: true,
+    },
+  });
+
+  if (!record) {
+    return res.status(404).json({ error: "Record not found" });
+  }
+
+  return res.json({
+    record: {
+      ...record,
+      computedStatus: computeContactStatus(record.updatedAt),
+    },
+  });
+}
+
+export async function createRecord(req: Request, res: Response) {
+  const { organizationId, contactId, pipelineId, currentStageId, assignedToId, title } = req.body;
+
+  if (!organizationId || !contactId || !pipelineId || !currentStageId) {
+    return res.status(400).json({
+      error: "organizationId, contactId, pipelineId, and currentStageId are required",
+    });
+  }
+
+  const record = await prisma.record.create({
+    data: {
+      organizationId,
+      contactId,
+      pipelineId,
+      currentStageId,
+      assignedToId,
+      title: title || "New Contact",
+      status: "active",
+      followUpLevel: "FU1",
+    },
+    include: {
+      contact: true,
+      currentStage: true,
+      assignedTo: true,
+    },
+  });
+
+  return res.status(201).json({ record });
+}
+
+export async function moveToNextStage(req: Request, res: Response) {
+  const { recordId, nextStageId, notes } = req.body;
+
+  if (!recordId || !nextStageId) {
+    return res.status(400).json({ error: "recordId and nextStageId are required" });
+  }
+
+  const record = await prisma.record.findUnique({
+    where: { id: recordId },
+    include: { currentStage: true },
+  });
+
+  if (!record) {
+    return res.status(404).json({ error: "Record not found" });
+  }
+
+  await prisma.recordStageHistory.create({
+    data: {
+      recordId,
+      fromStageId: record.currentStageId,
+      toStageId: nextStageId,
+      notes,
+    },
+  });
+
+  const updatedRecord = await prisma.record.update({
+    where: { id: recordId },
+    data: {
+      currentStageId: nextStageId,
+      updatedAt: new Date(),
+    },
+    include: { currentStage: true, contact: true },
+  });
+
+  return res.json({ record: updatedRecord });
+}
+
+export async function updateFollowUpLevel(req: Request, res: Response) {
+  const { recordId, level } = req.body;
+
+  if (!recordId || !level) {
+    return res.status(400).json({ error: "recordId and level are required" });
+  }
+
+  const validLevels = ["FU1", "FU2", "FU3", "FU4", "FU5"];
+  if (!validLevels.includes(level)) {
+    return res.status(400).json({ error: "Invalid follow-up level" });
+  }
+
+  const record = await prisma.record.update({
+    where: { id: recordId },
+    data: {
+      followUpLevel: level,
+      updatedAt: new Date(),
+    },
+  });
+
+  return res.json({ record });
+}
+
+export async function shareContent(req: Request, res: Response) {
+  const { recordId, contentIds, sharedById } = req.body;
+
+  if (!recordId || !Array.isArray(contentIds) || contentIds.length === 0) {
+    return res.status(400).json({
+      error: "recordId and contentIds array are required",
+    });
+  }
+
+  const contentShares = await Promise.all(
+    contentIds.map((contentId: string) =>
+      prisma.contentShare.create({
+        data: {
+          recordId,
+          contentId,
+          sharedById,
+          status: "shared",
+        },
+        include: { content: true },
+      })
+    )
+  );
+
+  const record = await prisma.record.update({
+    where: { id: recordId },
+    data: {
+      contentShared: true,
+      updatedAt: new Date(),
+    },
+  });
+
+  return res.json({ record, contentShares });
+}
+
+export async function confirmReadinessForGoodNews(req: Request, res: Response) {
+  const { recordId, goodNewsDate, attendanceType } = req.body;
+
+  if (!recordId) {
+    return res.status(400).json({ error: "recordId is required" });
+  }
+
+  const record = await prisma.record.findUnique({
+    where: { id: recordId },
+    include: { contact: { include: { familyMembers: true } } },
+  });
+
+  if (!record) {
+    return res.status(404).json({ error: "Record not found" });
+  }
+
+  if (!record.contentShared) {
+    return res.status(400).json({
+      error: "Content must be shared before confirming readiness",
+    });
+  }
+
+  const goodNewsDetail = await prisma.goodNewsDetail.create({
+    data: {
+      recordId,
+      status: "confirmed",
+      date: goodNewsDate ? new Date(goodNewsDate) : new Date(),
+      attendanceType,
+      confirmedAt: new Date(),
+    },
+  });
+
+  const travelDetail = await prisma.travelDetail.create({
+    data: {
+      recordId,
+      goodNewsDetailId: goodNewsDetail.id,
+      contactName: `${record.contact.firstName} ${record.contact.lastName}`,
+      familyMembers: record.contact.familyMembers.map((familyMember) => ({
+        name: `${familyMember.firstName} ${familyMember.lastName || ""}`.trim(),
+        relationship: familyMember.relationship,
+        isPrimary: familyMember.isPrimaryContact,
+      })),
+      departureLocation: "To be determined",
+      arrivalLocation: "Good News Event Location",
+      departureDate: goodNewsDate ? new Date(goodNewsDate) : new Date(),
+    },
+  });
+
+  const updatedRecord = await prisma.record.update({
+    where: { id: recordId },
+    data: {
+      readyForGoodNews: true,
+      updatedAt: new Date(),
+    },
+  });
+
+  return res.json({
+    record: updatedRecord,
+    goodNewsDetail,
+    travelDetail,
+  });
+}
+
+export async function sendTravelDetailsToManager(req: Request, res: Response) {
+  const { travelDetailId, managerId } = req.body;
+
+  if (!travelDetailId || !managerId) {
+    return res.status(400).json({
+      error: "travelDetailId and managerId are required",
+    });
+  }
+
+  const travelDetail = await prisma.travelDetail.update({
+    where: { id: travelDetailId },
+    data: {
+      sentToManager: true,
+      sentAt: new Date(),
+    },
+  });
+
+  console.log(`Travel details sent to manager ${managerId}`);
+
+  return res.json({ travelDetail });
+}
+
+export async function recordGoodNewsAttendance(req: Request, res: Response) {
+  const { recordId, attendancePeriod } = req.body;
+
+  if (!recordId) {
+    return res.status(400).json({ error: "recordId is required" });
+  }
+
+  const record = await prisma.record.update({
+    where: { id: recordId },
+    data: {
+      attendedGoodNews: true,
+      goodNewsPeriod: attendancePeriod || "during week",
+      updatedAt: new Date(),
+    },
+  });
+
+  const fellowshipTracking = await prisma.fellowshipTracking.create({
+    data: {
+      recordId,
+      goodNewsAttendedDate: new Date(),
+      status: "in_progress",
+    },
+  });
+
+  return res.json({ record, fellowshipTracking });
+}
+
+export async function markThreeMonthCompletion(req: Request, res: Response) {
+  const { recordId } = req.body;
+
+  if (!recordId) {
+    return res.status(400).json({ error: "recordId is required" });
+  }
+
+  const record = await prisma.record.update({
+    where: { id: recordId },
+    data: {
+      completedThreeMonths: true,
+      status: "completed",
+      updatedAt: new Date(),
+    },
+  });
+
+  await prisma.fellowshipTracking.updateMany({
+    where: { recordId },
+    data: {
+      status: "completed",
+      threeMonthCompletionDate: new Date(),
+    },
+  });
+
+  return res.json({ record });
+}
