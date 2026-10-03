@@ -23,15 +23,15 @@ model Organization {
 }
 
 model User {
-  id             String   @id @default(uuid())
-  organizationId  String
-  fullName       String
-  email          String   @unique
-  phone          String?
-  role           String   @default("member")
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String   @id @default(uuid())
+  organizationId String
+  fullName      String
+  email         String   @unique
+  phone         String?
+  role          String   @default("member")
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
   records      Record[]
@@ -41,15 +41,15 @@ model User {
 }
 
 model Pipeline {
-  id             String        @id @default(uuid())
-  organizationId  String
-  name           String
-  description    String?
-  status         String        @default("active")
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  id            String   @id @default(uuid())
+  organizationId String
+  name          String
+  description   String?
+  status        String   @default("active")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id])
+  organization Organization    @relation(fields: [organizationId], references: [id])
   stages       PipelineStage[]
   records      Record[]
 }
@@ -80,7 +80,7 @@ model Contact {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organization   Organization   @relation(fields: [organizationId], references: [id])
   familyMembers FamilyMember[]
   records       Record[]
 }
@@ -102,21 +102,21 @@ model FamilyMember {
 model Record {
   id                    String   @id @default(uuid())
   organizationId        String
-  contactId            String
-  pipelineId           String
-  currentStageId       String?
-  assignedToId         String?
-  title                String
-  status               String   @default("active")
-  followUpLevel        String?
-  contentShared        Boolean  @default(false)
-  readyForGoodNews     Boolean  @default(false)
-  attendedGoodNews     Boolean  @default(false)
-  goodNewsPeriod       String?
-  completedThreeMonths Boolean  @default(false)
-  dueDate              DateTime?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  contactId             String
+  pipelineId            String
+  currentStageId        String?
+  assignedToId          String?
+  title                 String
+  status                String   @default("active")
+  followUpLevel         String?
+  contentShared         Boolean  @default(false)
+  readyForGoodNews      Boolean  @default(false)
+  attendedGoodNews      Boolean  @default(false)
+  goodNewsPeriod        String?
+  completedThreeMonths  Boolean  @default(false)
+  dueDate               DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   organization   Organization @relation(fields: [organizationId], references: [id])
   contact        Contact      @relation(fields: [contactId], references: [id])
@@ -129,6 +129,11 @@ model Record {
   goodNewsDetails GoodNewsDetail[]
   travelDetails  TravelDetail[]
   stageHistory   RecordStageHistory[]
+
+  @@index([organizationId, updatedAt])
+  @@index([organizationId, currentStageId])
+  @@index([organizationId, followUpLevel])
+  @@index([organizationId, status])
 }
 
 model RecordStageHistory {
@@ -186,21 +191,21 @@ model ContentShare {
 }
 
 model GoodNewsDetail {
-  id             String   @id @default(uuid())
+  id             String    @id @default(uuid())
   recordId       String
-  status         String   @default("pending")
+  status         String    @default("pending")
   date           DateTime?
   attendanceType String?
   confirmedAt    DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  record        Record @relation(fields: [recordId], references: [id])
+  record        Record         @relation(fields: [recordId], references: [id])
   travelDetails TravelDetail[]
 }
 
 model TravelDetail {
-  id                 String   @id @default(uuid())
+  id                 String    @id @default(uuid())
   recordId           String
   goodNewsDetailId   String?
   contactName        String?
@@ -211,31 +216,31 @@ model TravelDetail {
   returnDate         DateTime?
   transportationMode String?
   specialRequirements String?
-  sentToManager      Boolean  @default(false)
+  sentToManager      Boolean   @default(false)
   sentAt             DateTime?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  record        Record @relation(fields: [recordId], references: [id])
+  record        Record          @relation(fields: [recordId], references: [id])
   goodNewsDetail GoodNewsDetail? @relation(fields: [goodNewsDetailId], references: [id])
 }
 
 model Task {
-  id             String   @id @default(uuid())
-  organizationId  String
-  recordId       String
-  assignedToId   String
-  title          String
-  description    String?
-  dueDate        DateTime?
-  priority       String?
-  status         String   @default("pending")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String   @id @default(uuid())
+  organizationId String
+  recordId      String
+  assignedToId  String
+  title         String
+  description   String?
+  dueDate       DateTime?
+  priority      String?
+  status        String   @default("pending")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
-  record       Record @relation(fields: [recordId], references: [id])
-  assignedTo   User @relation(fields: [assignedToId], references: [id])
+  record       Record       @relation(fields: [recordId], references: [id])
+  assignedTo   User         @relation(fields: [assignedToId], references: [id])
 }
 
 model Report {
@@ -249,5 +254,5 @@ model Report {
   createdAt     DateTime @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id])
-  user         User? @relation(fields: [userId], references: [id])
+  user         User?        @relation(fields: [userId], references: [id])
 }

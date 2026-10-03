@@ -3,6 +3,21 @@ import { prisma } from "../lib/prisma.js";
 
 const router = Router();
 
+function getDaysSince(updatedAt: Date | null | undefined, now = Date.now()) {
+  if (!updatedAt) return 0;
+  return Math.floor((now - new Date(updatedAt).getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function getDueBucket(updatedAt: Date | null | undefined) {
+  const diffDays = getDaysSince(updatedAt);
+
+  if (diffDays >= 30) return "pending";
+  if (diffDays >= 14) return "overdue";
+  if (diffDays >= 7) return "due";
+
+  return "active";
+}
+
 router.get("/summary", async (req, res) => {
   const { organizationId } = req.query;
 
@@ -12,46 +27,52 @@ router.get("/summary", async (req, res) => {
 
   const records = await prisma.record.findMany({
     where: { organizationId },
-    include: { currentStage: true },
+    include: {
+      currentStage: true,
+      travelDetails: true,
+    },
   });
 
   const stageBreakdown = {
-    freshContacts: records.filter((record) => record.currentStage?.stageName === "Fresh Contacts").length,
-    followUpFU1: records.filter((record) => record.followUpLevel === "FU1").length,
-    followUpFU2: records.filter((record) => record.followUpLevel === "FU2").length,
-    followUpFU3: records.filter((record) => record.followUpLevel === "FU3").length,
-    followUpFU4: records.filter((record) => record.followUpLevel === "FU4").length,
-    followUpFU5: records.filter((record) => record.followUpLevel === "FU5").length,
-    contentSharing: records.filter((record) => record.contentShared).length,
-    readyForGoodNews: records.filter((record) => record.readyForGoodNews).length,
-    travelDetails: records.filter((record) => record.readyForGoodNews).length,
-    attendedGoodNews: records.filter((record) => record.attendedGoodNews).length,
-    completedThreeMonths: records.filter((record) => record.completedThreeMonths).length,
+    freshContacts: 0,
+    followUpFU1: 0,
+    followUpFU2: 0,
+    followUpFU3: 0,
+    followUpFU4: 0,
+    followUpFU5: 0,
+    contentSharing: 0,
+    readyForGoodNews: 0,
+    travelDetails: 0,
+    attendedGoodNews: 0,
+    completedThreeMonths: 0,
   };
 
-  const due = records.filter((record) => {
-    if (!record.updatedAt) return false;
-    const diffDays = Math.floor(
-      (Date.now() - new Date(record.updatedAt).getTime()) / (1000 * 60 * 60 * 24)
-    );
-    return diffDays >= 7 && diffDays < 14;
-  }).length;
+  let due = 0;
+  let overdue = 0;
+  let pending = 0;
 
-  const overdue = records.filter((record) => {
-    if (!record.updatedAt) return false;
-    const diffDays = Math.floor(
-      (Date.now() - new Date(record.updatedAt).getTime()) / (1000 * 60 * 60 * 24)
-    );
-    return diffDays >= 14 && diffDays < 30;
-  }).length;
+  for (const record of records) {
+    if (record.currentStage?.stageName === "Fresh Contacts") {
+      stageBreakdown.freshContacts += 1;
+    }
 
-  const pending = records.filter((record) => {
-    if (!record.updatedAt) return false;
-    const diffDays = Math.floor(
-      (Date.now() - new Date(record.updatedAt).getTime()) / (1000 * 60 * 60 * 24)
-    );
-    return diffDays >= 30;
-  }).length;
+    if (record.followUpLevel === "FU1") stageBreakdown.followUpFU1 += 1;
+    if (record.followUpLevel === "FU2") stageBreakdown.followUpFU2 += 1;
+    if (record.followUpLevel === "FU3") stageBreakdown.followUpFU3 += 1;
+    if (record.followUpLevel === "FU4") stageBreakdown.followUpFU4 += 1;
+    if (record.followUpLevel === "FU5") stageBreakdown.followUpFU5 += 1;
+
+    if (record.contentShared) stageBreakdown.contentSharing += 1;
+    if (record.readyForGoodNews) stageBreakdown.readyForGoodNews += 1;
+    if (record.travelDetails.length > 0) stageBreakdown.travelDetails += 1;
+    if (record.attendedGoodNews) stageBreakdown.attendedGoodNews += 1;
+    if (record.completedThreeMonths) stageBreakdown.completedThreeMonths += 1;
+
+    const bucket = getDueBucket(record.updatedAt);
+    if (bucket === "due") due += 1;
+    if (bucket === "overdue") overdue += 1;
+    if (bucket === "pending") pending += 1;
+  }
 
   const summary = {
     totalContacts: records.length,
@@ -76,36 +97,47 @@ router.get("/team", async (req, res) => {
 
   const users = await prisma.user.findMany({
     where: { organizationId },
-    include: {
-      records: true,
+    select: {
+      id: true,
+      fullName: true,
+      records: {
+        select: {
+          updatedAt: true,
+          readyForGoodNews: true,
+          attendedGoodNews: true,
+          completedThreeMonths: true,
+        },
+      },
     },
   });
 
-  const teamReport = users.map((user) => ({
-    userId: user.id,
-    fullName: user.fullName,
-    totalAssigned: user.records.length,
-    due: user.records.filter((record) => {
-      const diffDays = Math.floor(
-        (Date.now() - new Date(record.updatedAt).getTime()) / (1000 * 60 * 60 * 24)
-      );
-      return diffDays >= 7 && diffDays < 14;
-    }).length,
-    overdue: user.records.filter((record) => {
-      const diffDays = Math.floor(
-        (Date.now() - new Date(record.updatedAt).getTime()) / (1000 * 60 * 60 * 24)
-      );
-      return diffDays >= 14 && diffDays < 30;
-    }).length,
-    pending: user.records.filter((record) => {
-      const diffDays = Math.floor(
-        (Date.now() - new Date(record.updatedAt).getTime()) / (1000 * 60 * 60 * 24)
-      );
-      return diffDays >= 30;
-    }).length,
-    readyForGoodNews: user.records.filter((record) => record.readyForGoodNews).length,
-    completedThreeMonths: user.records.filter((record) => record.completedThreeMonths).length,
-  }));
+  const teamReport = users.map((user) => {
+    let due = 0;
+    let overdue = 0;
+    let pending = 0;
+    let readyForGoodNews = 0;
+    let completedThreeMonths = 0;
+
+    for (const record of user.records) {
+      const bucket = getDueBucket(record.updatedAt);
+      if (bucket === "due") due += 1;
+      if (bucket === "overdue") overdue += 1;
+      if (bucket === "pending") pending += 1;
+      if (record.readyForGoodNews) readyForGoodNews += 1;
+      if (record.completedThreeMonths) completedThreeMonths += 1;
+    }
+
+    return {
+      userId: user.id,
+      fullName: user.fullName,
+      totalAssigned: user.records.length,
+      due,
+      overdue,
+      pending,
+      readyForGoodNews,
+      completedThreeMonths,
+    };
+  });
 
   return res.json({ teamReport });
 });
@@ -115,38 +147,51 @@ router.get("/individual/:userId", async (req, res) => {
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: { records: true },
+    select: {
+      id: true,
+      fullName: true,
+      records: {
+        select: {
+          updatedAt: true,
+          readyForGoodNews: true,
+          attendedGoodNews: true,
+          completedThreeMonths: true,
+        },
+      },
+    },
   });
 
   if (!user) {
     return res.status(404).json({ error: "User not found" });
   }
 
+  let due = 0;
+  let overdue = 0;
+  let pending = 0;
+  let readyForGoodNews = 0;
+  let attendedGoodNews = 0;
+  let completedThreeMonths = 0;
+
+  for (const record of user.records) {
+    const bucket = getDueBucket(record.updatedAt);
+    if (bucket === "due") due += 1;
+    if (bucket === "overdue") overdue += 1;
+    if (bucket === "pending") pending += 1;
+    if (record.readyForGoodNews) readyForGoodNews += 1;
+    if (record.attendedGoodNews) attendedGoodNews += 1;
+    if (record.completedThreeMonths) completedThreeMonths += 1;
+  }
+
   const summary = {
     userId: user.id,
     fullName: user.fullName,
     totalAssigned: user.records.length,
-    due: user.records.filter((record) => {
-      const diffDays = Math.floor(
-        (Date.now() - new Date(record.updatedAt).getTime()) / (1000 * 60 * 60 * 24)
-      );
-      return diffDays >= 7 && diffDays < 14;
-    }).length,
-    overdue: user.records.filter((record) => {
-      const diffDays = Math.floor(
-        (Date.now() - new Date(record.updatedAt).getTime()) / (1000 * 60 * 60 * 24)
-      );
-      return diffDays >= 14 && diffDays < 30;
-    }).length,
-    pending: user.records.filter((record) => {
-      const diffDays = Math.floor(
-        (Date.now() - new Date(record.updatedAt).getTime()) / (1000 * 60 * 60 * 24)
-      );
-      return diffDays >= 30;
-    }).length,
-    readyForGoodNews: user.records.filter((record) => record.readyForGoodNews).length,
-    attendedGoodNews: user.records.filter((record) => record.attendedGoodNews).length,
-    completedThreeMonths: user.records.filter((record) => record.completedThreeMonths).length,
+    due,
+    overdue,
+    pending,
+    readyForGoodNews,
+    attendedGoodNews,
+    completedThreeMonths,
   };
 
   return res.json({ summary });

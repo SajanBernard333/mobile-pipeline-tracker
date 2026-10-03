@@ -1,10 +1,13 @@
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import { prisma } from "../lib/prisma.js";
 
 export async function getPipelineSummary() {
   const records = await prisma.record.findMany({
-    include: { currentStage: true },
+    select: {
+      status: true,
+      followUpLevel: true,
+      contentShared: true,
+      readyForGoodNews: true,
+    },
   });
 
   const totals = {

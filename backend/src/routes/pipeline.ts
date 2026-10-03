@@ -3,12 +3,32 @@ import { prisma } from "../lib/prisma.js";
 
 const router = Router();
 
-router.get("/", async (_req, res) => {
-  const pipelines = await prisma.pipeline.findMany({
-    include: { stages: true },
-  });
+router.get("/", async (req, res) => {
+  const organizationId = typeof req.query.organizationId === "string" ? req.query.organizationId : undefined;
+  const page = Math.max(1, Number(req.query.page ?? 1));
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 20)));
+  const where = organizationId ? { organizationId } : {};
 
-  res.json({ pipelines });
+  const [pipelines, total] = await Promise.all([
+    prisma.pipeline.findMany({
+      where,
+      include: { stages: true },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    prisma.pipeline.count({ where }),
+  ]);
+
+  res.json({
+    pipelines,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    },
+  });
 });
 
 router.post("/create", async (req, res) => {
