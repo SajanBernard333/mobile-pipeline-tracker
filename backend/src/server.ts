@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 
 import pipelineRouter from "./routes/pipeline.js";
 import contactRouter from "./routes/contacts.js";
+import recordRouter from "./routes/records.js";
 
 dotenv.config();
 
@@ -19,6 +20,7 @@ app.get("/health", (_req, res) => {
 
 app.use("/api/pipeline", pipelineRouter);
 app.use("/api/contacts", contactRouter);
+app.use("/api/records", recordRouter);
 
 app.listen(port, () => {
   console.log(`Backend running on http://localhost:${port}`);
