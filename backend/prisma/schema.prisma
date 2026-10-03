@@ -1,0 +1,253 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  settings  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users     User[]
+  pipelines Pipeline[]
+  contacts  Contact[]
+  tasks     Task[]
+  notes     Note[]
+  reports   Report[]
+}
+
+model User {
+  id             String   @id @default(uuid())
+  organizationId  String
+  fullName       String
+  email          String   @unique
+  phone          String?
+  role           String   @default("member")
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  records      Record[]
+  tasks        Task[]
+  notes        Note[]
+  reports      Report[]
+}
+
+model Pipeline {
+  id             String        @id @default(uuid())
+  organizationId  String
+  name           String
+  description    String?
+  status         String        @default("active")
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  stages       PipelineStage[]
+  records      Record[]
+}
+
+model PipelineStage {
+  id          String   @id @default(uuid())
+  pipelineId  String
+  stageName   String
+  stageOrder  Int
+  description String?
+  color       String?
+  createdAt   DateTime @default(now())
+
+  pipeline Pipeline @relation(fields: [pipelineId], references: [id])
+  records  Record[]
+}
+
+model Contact {
+  id             String   @id @default(uuid())
+  organizationId  String
+  firstName      String
+  lastName       String
+  email          String?
+  phone          String?
+  familySize     Int?
+  isFamilyUnit   Boolean  @default(false)
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  familyMembers FamilyMember[]
+  records       Record[]
+}
+
+model FamilyMember {
+  id               String   @id @default(uuid())
+  contactId        String
+  firstName        String
+  lastName         String?
+  phone            String?
+  email            String?
+  relationship    String?
+  isPrimaryContact Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  contact Contact @relation(fields: [contactId], references: [id])
+}
+
+model Record {
+  id                    String   @id @default(uuid())
+  organizationId        String
+  contactId            String
+  pipelineId           String
+  currentStageId       String?
+  assignedToId         String?
+  title                String
+  status               String   @default("active")
+  followUpLevel        String?
+  contentShared        Boolean  @default(false)
+  readyForGoodNews     Boolean  @default(false)
+  attendedGoodNews     Boolean  @default(false)
+  goodNewsPeriod       String?
+  completedThreeMonths Boolean  @default(false)
+  dueDate              DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  contact        Contact      @relation(fields: [contactId], references: [id])
+  pipeline       Pipeline     @relation(fields: [pipelineId], references: [id])
+  currentStage   PipelineStage? @relation(fields: [currentStageId], references: [id])
+  assignedTo     User?        @relation(fields: [assignedToId], references: [id])
+  notes          Note[]
+  tasks          Task[]
+  contentShares  ContentShare[]
+  goodNewsDetails GoodNewsDetail[]
+  travelDetails  TravelDetail[]
+  stageHistory   RecordStageHistory[]
+}
+
+model RecordStageHistory {
+  id          String   @id @default(uuid())
+  recordId    String
+  fromStageId String?
+  toStageId   String
+  changedById String?
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  record Record @relation(fields: [recordId], references: [id])
+}
+
+model Note {
+  id            String   @id @default(uuid())
+  organizationId String
+  recordId      String
+  userId        String?
+  activityType  String
+  message       String
+  metadata      Json?
+  createdAt     DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  record       Record @relation(fields: [recordId], references: [id])
+  user         User?  @relation(fields: [userId], references: [id])
+}
+
+model ContentLibrary {
+  id           String   @id @default(uuid())
+  organizationId String
+  name         String
+  type         String?
+  url          String?
+  description  String?
+  displayOrder Int?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  shares ContentShare[]
+}
+
+model ContentShare {
+  id         String   @id @default(uuid())
+  recordId   String
+  contentId  String
+  sharedById String?
+  feedback   String?
+  status     String   @default("pending")
+  createdAt  DateTime @default(now())
+
+  record  Record @relation(fields: [recordId], references: [id])
+  content ContentLibrary @relation(fields: [contentId], references: [id])
+}
+
+model GoodNewsDetail {
+  id             String   @id @default(uuid())
+  recordId       String
+  status         String   @default("pending")
+  date           DateTime?
+  attendanceType String?
+  confirmedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  record        Record @relation(fields: [recordId], references: [id])
+  travelDetails TravelDetail[]
+}
+
+model TravelDetail {
+  id                 String   @id @default(uuid())
+  recordId           String
+  goodNewsDetailId   String?
+  contactName        String?
+  familyMembers      Json?
+  departureLocation  String?
+  arrivalLocation    String?
+  departureDate      DateTime?
+  returnDate         DateTime?
+  transportationMode String?
+  specialRequirements String?
+  sentToManager      Boolean  @default(false)
+  sentAt             DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  record        Record @relation(fields: [recordId], references: [id])
+  goodNewsDetail GoodNewsDetail? @relation(fields: [goodNewsDetailId], references: [id])
+}
+
+model Task {
+  id             String   @id @default(uuid())
+  organizationId  String
+  recordId       String
+  assignedToId   String
+  title          String
+  description    String?
+  dueDate        DateTime?
+  priority       String?
+  status         String   @default("pending")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  record       Record @relation(fields: [recordId], references: [id])
+  assignedTo   User @relation(fields: [assignedToId], references: [id])
+}
+
+model Report {
+  id            String   @id @default(uuid())
+  organizationId String
+  userId        String?
+  name          String
+  type          String
+  filters       Json?
+  metrics       Json?
+  createdAt     DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User? @relation(fields: [userId], references: [id])
+}

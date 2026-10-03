@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "Pipeline Tracker",
+    "slug": "pipeline-tracker",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ]
+  }
+}
