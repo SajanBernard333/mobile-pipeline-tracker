@@ -1,62 +1,92 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
-  View,
   TouchableOpacity,
+  View,
 } from "react-native";
 
-const pipelineStages = [
-  "Fresh Contacts",
-  "Follow Up FU1",
-  "Follow Up FU2",
-  "Follow Up FU3",
-  "Follow Up FU4",
-  "Follow Up FU5",
-  "Content Sharing",
-  "Ready for Good News",
-  "Travel Details",
-  "Attended Good News",
-  "Completed 3 Months in Fellowship",
-];
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+import { contacts } from "./src/data/mockData";
+import { DashboardScreen } from "./src/screens/DashboardScreen";
+import { PipelineScreen } from "./src/screens/PipelineScreen";
+import { ContactsScreen } from "./src/screens/ContactsScreen";
+import { ReportsScreen } from "./src/screens/ReportsScreen";
+import { NotificationsScreen } from "./src/screens/NotificationsScreen";
+import { LoginScreen } from "./src/screens/LoginScreen";
+
+const tabs = ["Dashboard", "Pipeline", "Contacts", "Reports", "Alerts"] as const;
+
+type TabName = (typeof tabs)[number];
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState<TabName>("Dashboard");
+  const [token, setToken] = useState<string | null>(null);
+  const [booting, setBooting] = useState(true);
+
+  useEffect(() => {
+    const bootstrap = async () => {
+      const saved = await AsyncStorage.getItem("pipeline_tracker_token");
+      setToken(saved);
+      setBooting(false);
+    };
+
+    bootstrap();
+  }, []);
+
+  if (booting) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
+          <Text style={styles.loadingText}>Loading app...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!token) {
+    return <LoginScreen onLoggedIn={(newToken) => setToken(newToken)} />;
+  }
+
+  const selectedContact = contacts[0] ?? null;
+
+  const renderScreen = () => {
+    switch (activeTab) {
+      case "Pipeline":
+        return <PipelineScreen />;
+      case "Contacts":
+        return <ContactsScreen contacts={contacts} selectedContact={selectedContact} onSelectContact={() => undefined} />;
+      case "Reports":
+        return <ReportsScreen />;
+      case "Alerts":
+        return <NotificationsScreen />;
+      case "Dashboard":
+      default:
+        return <DashboardScreen contacts={contacts} />;
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView>
-        <Text style={styles.title}>Pipeline Tracker</Text>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        <Text style={styles.header}>Pipeline Tracker</Text>
 
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Overview</Text>
-          <Text style={styles.text}>
-            Mobile-first tracking for your discipleship and fellowship pipeline.
-          </Text>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Pipeline Stages</Text>
-          {pipelineStages.map((stage, index) => (
-            <TouchableOpacity key={index} style={styles.stageItem}>
-              <Text style={styles.stageText}>
-                {index + 1}. {stage}
-              </Text>
+        <View style={styles.tabRow}>
+          {tabs.map((tab) => (
+            <TouchableOpacity
+              key={tab}
+              onPress={() => setActiveTab(tab)}
+              style={[styles.tabButton, activeTab === tab && styles.activeTabButton]}
+            >
+              <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>{tab}</Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Due Status</Text>
-          <Text style={styles.text}>7 days: Due</Text>
-          <Text style={styles.text}>14 days: Overdue</Text>
-          <Text style={styles.text}>30+ days: Pending</Text>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Key Workflow</Text>
-          <Text style={styles.text}>Contact → Follow-up → Content Sharing → Ready for Good News → Travel → Attendance → 3 Month Fellowship</Text>
-        </View>
+        {renderScreen()}
       </ScrollView>
     </SafeAreaView>
   );
@@ -67,41 +97,51 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#eef4ff",
   },
-  title: {
+  centered: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    fontSize: 18,
+    color: "#2f6fed",
+    fontWeight: "700",
+  },
+  scrollContent: {
+    paddingBottom: 30,
+  },
+  header: {
     fontSize: 28,
     fontWeight: "700",
-    margin: 20,
-    color: "#1c2333",
-  },
-  card: {
-    backgroundColor: "#ffffff",
-    borderRadius: 16,
-    padding: 18,
+    color: "#1d2433",
     marginHorizontal: 20,
+    marginTop: 18,
+    marginBottom: 14,
+  },
+  tabRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginHorizontal: 16,
     marginBottom: 16,
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 3,
+    gap: 8,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    marginBottom: 10,
-    color: "#202633",
-  },
-  text: {
-    fontSize: 15,
-    color: "#424c5d",
-    lineHeight: 22,
-  },
-  stageItem: {
+  tabButton: {
     paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#edf1f7",
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: "#dfe9ff",
+    minWidth: 90,
+    alignItems: "center",
   },
-  stageText: {
-    fontSize: 15,
-    color: "#202633",
+  activeTabButton: {
+    backgroundColor: "#2f6fed",
+  },
+  tabText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#39507a",
+  },
+  activeTabText: {
+    color: "#ffffff",
   },
 });
